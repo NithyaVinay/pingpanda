@@ -53,6 +53,17 @@ def parse_arguments(argv=None):
     parser.add_argument("-v", "--version", action="store_true", help="Display version information")
     parser.add_argument("-update", action="store_true", help="Update the tool")
     parser.add_argument(
+    "--quiet",
+    action="store_true",
+    help="Suppress the startup banner and progress bar",
+)
+
+parser.add_argument(
+    "--no-colour",
+    action="store_true",
+    help="Disable coloured terminal output",
+)
+    parser.add_argument(
     "--max-concurrent",
     type=positive_int,
     default=DEFAULT_MAX_CONCURRENT,
@@ -85,7 +96,8 @@ async def main(argv=None):
         print("Checking for updates...")
         return
 
-    print(BANNER)
+    if not args.quiet:
+        print(BANNER)
 
     urls = load_urls(args)
     if not urls:
