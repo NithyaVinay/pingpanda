@@ -56,20 +56,20 @@ def parse_arguments(argv=None):
     "--quiet",
     action="store_true",
     help="Suppress the startup banner and progress bar",
-)
+    )
 
-parser.add_argument(
-    "--no-colour",
-    action="store_true",
-    help="Disable coloured terminal output",
-)
     parser.add_argument(
-    "--max-concurrent",
-    type=positive_int,
-    default=DEFAULT_MAX_CONCURRENT,
-    help="Maximum number of URLs to check concurrently (default: 10)",
-)
-    return parser.parse_args(argv)
+        "--no-colour",
+        action="store_true",
+        help="Disable coloured terminal output",
+    )
+        parser.add_argument(
+        "--max-concurrent",
+        type=positive_int,
+        default=DEFAULT_MAX_CONCURRENT,
+        help="Maximum number of URLs to check concurrently (default: 10)",
+    )
+        return parser.parse_args(argv)
 
 
 def load_urls(args):
