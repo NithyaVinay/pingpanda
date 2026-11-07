@@ -43,15 +43,25 @@ def summarize(status_codes):
 
 
 # Print the report to the terminal
-def render_report(status_codes):
+def render_report(status_codes, no_colour=False):
     for group, results in status_codes.items():
         if not results:
             continue
-        print(COLORS.get(group, Fore.WHITE) + f"===== {group.upper()} =====")
+
+        heading = f"===== {group.upper()} ====="
+
+        if no_colour:
+            print(heading)
+        else:
+            print(COLORS.get(group, Fore.WHITE) + heading)
+
         for result in results:
             print(format_result_line(result))
             print()
-        print(Style.RESET_ALL)
+
+        if not no_colour:
+            print(Style.RESET_ALL)
+
     print("===== SUMMARY =====")
     print(summarize(status_codes))
 
