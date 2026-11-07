@@ -103,13 +103,14 @@ async def check_url_status(session, url_id, url):
         redirect_ip_port,
     )
 
-
 async def check_all(
     urls,
     initial_results=None,
     on_result=None,
     max_concurrent=DEFAULT_MAX_CONCURRENT,
+    show_progress=True,
 ):
+
     """Check unfinished URLs with bounded concurrency.
 
     URL IDs always refer to the original input order. Existing checkpoint
@@ -151,7 +152,7 @@ async def check_all(
         total=len(urls),
         initial=len(results),
         desc="Checking URLs",
-    ) if len(urls) > 1 else None
+    ) if show_progress and len(urls) > 1 else None
 
     tasks = []
 
