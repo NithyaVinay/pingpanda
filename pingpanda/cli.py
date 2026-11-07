@@ -129,7 +129,7 @@ async def main(argv=None):
         print(f"Checkpoint error: {exc}", file=sys.stderr)
         return
     status_codes = classify_results(results)
-    render_report(status_codes)
+    render_report(status_codes, no_colour=args.no_colour)
 
     if args.output:
         save_report(status_codes, args.output)
