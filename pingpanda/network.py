@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import socket
 import time
 from urllib.parse import urlparse
@@ -15,6 +16,9 @@ from pingpanda.models import UrlResult
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
 DEFAULT_MAX_CONCURRENT = 10
+DEFAULT_RETRIES = 0
+DEFAULT_RETRY_DELAY_SECONDS = 1.0
+RETRYABLE_STATUS_CODES = frozenset({408, 429, 502, 503, 504})
 
 
 # Function to resolve hostname to IP:Port
@@ -63,45 +67,133 @@ def normalize_url(url):
     return url
 
 
-async def check_url_status(session, url_id, url):
+def _validate_retry_options(max_retries, retry_delay):
+    if (
+        isinstance(max_retries, bool)
+        or not isinstance(max_retries, int)
+        or max_retries < 0
+    ):
+        raise ValueError("max_retries must be a non-negative integer")
+    if (
+        isinstance(retry_delay, bool)
+        or not isinstance(retry_delay, (int, float))
+        or not math.isfinite(retry_delay)
+    ):
+        raise ValueError("retry_delay must be a non-negative number")
+    if retry_delay < 0:
+        raise ValueError("retry_delay must be a non-negative number")
+
+
+def _is_retryable_exception(exc):
+    return not isinstance(exc, httpx.TooManyRedirects)
+
+
+async def check_url_status(
+    session,
+    url_id,
+    url,
+    max_retries=DEFAULT_RETRIES,
+    retry_delay=DEFAULT_RETRY_DELAY_SECONDS,
+):
+    _validate_retry_options(max_retries, retry_delay)
     url = normalize_url(url)
     started = time.perf_counter()
-    try:
-        response = await asyncio.wait_for(
-        session.get(
-            url,
-            follow_redirects=True,
-            timeout=httpx.Timeout(DEFAULT_TIMEOUT_SECONDS, read=None),
-            ),
-            timeout=DEFAULT_TIMEOUT_SECONDS,
+def _categorize_exception(exc: Exception) -> str:
+    if isinstance(exc, (asyncio.TimeoutError, httpx.TimeoutException)):
+        return "CONNECTION_TIMEOUT"
+    if isinstance(exc, httpx.ConnectError):
+        err_msg = str(exc).lower()
+        if any(
+            term in err_msg
+            for term in (
+                "gaierror",
+                "name or service not known",
+                "nodename nor servname provided",
+                "getaddrinfo",
+            )
+        ):
+            return "DNS_RESOLUTION_ERROR"
+        return "CONNECTION_REFUSED"
+    if isinstance(exc, httpx.RequestError):
+        err_msg = str(exc).lower()
+        if any(term in err_msg for term in ("certificate", "ssl", "cert")):
+            return "SSL_CERTIFICATE_ERROR"
+        if "timeout" in err_msg:
+            return "CONNECTION_TIMEOUT"
+        return "HTTP_PROTOCOL_ERROR"
+    return "NETWORK_ERROR"
+
+
+async def check_url_status(
+    session,
+    url_id,
+    url,
+    max_retries=DEFAULT_RETRIES,
+    retry_delay=DEFAULT_RETRY_DELAY_SECONDS,
+):
+    _validate_retry_options(max_retries, retry_delay)
+    url = normalize_url(url)
+    started = time.perf_counter()
+    attempts = 0
+
+    while True:
+        attempts += 1
+        try:
+            response = await asyncio.wait_for(
+                session.get(
+                    url,
+                    follow_redirects=True,
+                    timeout=httpx.Timeout(DEFAULT_TIMEOUT_SECONDS, read=None),
+                ),
+                timeout=DEFAULT_TIMEOUT_SECONDS,
+            )
+        except (httpx.RequestError, asyncio.TimeoutError) as exc:
+            if attempts <= max_retries and (
+                not isinstance(exc, httpx.RequestError)
+                or _is_retryable_exception(exc)
+            ):
+                await asyncio.sleep(retry_delay * 2 ** (attempts - 1))
+                continue
+
+            elapsed = time.perf_counter() - started
+            category = _categorize_exception(exc)
+            return UrlResult(
+                url_id,
+                url,
+                None,
+                elapsed,
+                None,
+                "IP:Port Not Found",
+                None,
+                attempts=attempts,
+                error_category=category,
+            )
+
+        if response.status_code in RETRYABLE_STATUS_CODES and attempts <= max_retries:
+            await response.aclose()
+            await asyncio.sleep(retry_delay * 2 ** (attempts - 1))
+            continue
+
+        final_url = str(response.url)
+        original_ip_port = await resolve_ip_and_port(url)
+        redirect_ip_port = (
+            await resolve_ip_and_port(final_url)
+            if final_url != url
+            else None
         )
-    except httpx.RequestError:
+        redirect_to = final_url if final_url != url else None
+
         elapsed = time.perf_counter() - started
-        return UrlResult(url_id, url, None, elapsed, None, "IP:Port Not Found", None)
-    except asyncio.TimeoutError:
-        elapsed = time.perf_counter() - started
-        return UrlResult(url_id, url, None, elapsed, None, "IP:Port Not Found", None)
-
-    final_url = str(response.url)
-    original_ip_port = await resolve_ip_and_port(url)
-
-    redirect_ip_port = (
-    await resolve_ip_and_port(final_url)
-    if final_url != url
-    else None
-    )
-    redirect_to = final_url if final_url != url else None
-
-    elapsed = time.perf_counter() - started
-    return UrlResult(
-        url_id,
-        url,
-        response.status_code,
-        elapsed,
-        redirect_to,
-        original_ip_port,
-        redirect_ip_port,
-    )
+        return UrlResult(
+            url_id,
+            url,
+            response.status_code,
+            elapsed,
+            redirect_to,
+            original_ip_port,
+            redirect_ip_port,
+            attempts=attempts,
+        )
 
 async def check_all(
     urls,
@@ -109,6 +201,8 @@ async def check_all(
     on_result=None,
     max_concurrent=DEFAULT_MAX_CONCURRENT,
     show_progress=True,
+    max_retries=DEFAULT_RETRIES,
+    retry_delay=DEFAULT_RETRY_DELAY_SECONDS,
 ):
 
     """Check unfinished URLs with bounded concurrency.
@@ -122,6 +216,7 @@ async def check_all(
         or max_concurrent <= 0
     ):
         raise ValueError("max_concurrent must be a positive integer")
+    _validate_retry_options(max_retries, retry_delay)
 
     urls = list(urls)
     results = dict(initial_results or {})
@@ -166,7 +261,13 @@ async def check_all(
                         return
 
                     url_id, url = item
-                    result = await check_url_status(session, url_id, url)
+                    result = await check_url_status(
+                        session,
+                        url_id,
+                        url,
+                        max_retries=max_retries,
+                        retry_delay=retry_delay,
+                    )
                     results[result.url_id] = result
 
                     if on_result is not None:
