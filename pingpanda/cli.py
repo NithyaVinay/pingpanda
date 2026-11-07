@@ -122,6 +122,7 @@ async def main(argv=None):
             initial_results=initial_results,
             on_result=persist_progress,
             max_concurrent=args.max_concurrent,
+            show_progress=not args.quiet,
         )
         # Also create a checkpoint for an empty or already-complete resumed scan.
         save_checkpoint(args.checkpoint, urls, results)
