@@ -29,6 +29,7 @@ def make_output_safe():
         except (ValueError, OSError):
             pass
 
+
 def positive_int(value):
     try:
         number = int(value)
@@ -64,11 +65,13 @@ def non_negative_float(value):
 
     return number
 
+
 def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(description="URL Status Checker")
     parser.add_argument("-d", "--domain", help="Single domain/URL to check")
     parser.add_argument("-l", "--list", help="File containing list of domains/URLs to check")
     parser.add_argument("-o", "--output", help="File to save the output")
+
     parser.add_argument(
         "--checkpoint",
         default=DEFAULT_CHECKPOINT,
@@ -94,24 +97,23 @@ def parse_arguments(argv=None):
     )
     parser.add_argument("-v", "--version", action="store_true", help="Display version information")
     parser.add_argument("-update", action="store_true", help="Update the tool")
-    parser.add_argument(
-    "--quiet",
-    action="store_true",
-    help="Suppress the startup banner and progress bar",
-    )
 
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress the startup banner and progress bar",
+    )
     parser.add_argument(
         "--no-colour",
         action="store_true",
         help="Disable coloured terminal output",
     )
-        parser.add_argument(
+    parser.add_argument(
         "--max-concurrent",
         type=positive_int,
         default=DEFAULT_MAX_CONCURRENT,
         help="Maximum number of URLs to check concurrently (default: 10)",
     )
-        return parser.parse_args(argv)
     parser.add_argument(
         "--format",
         choices=["text", "json", "csv", "markdown"],
@@ -123,6 +125,7 @@ def parse_arguments(argv=None):
         action="store_true",
         help="Export summary statistics and latency percentiles only",
     )
+
     return parser.parse_args(argv)
 
 
@@ -159,13 +162,18 @@ async def main(argv=None):
         return
 
     initial_results = {}
+
     if args.resume:
         try:
             initial_results = load_checkpoint(args.checkpoint, urls)
         except CheckpointError as exc:
             print(f"Checkpoint error: {exc}", file=sys.stderr)
             return
-        print(f"Resuming scan: {len(initial_results)} of {len(urls)} URLs already completed.")
+
+        print(
+            f"Resuming scan: {len(initial_results)} "
+            f"of {len(urls)} URLs already completed."
+        )
 
     def persist_progress(completed_results):
         save_checkpoint(args.checkpoint, urls, completed_results)
@@ -180,14 +188,21 @@ async def main(argv=None):
             max_retries=args.retries,
             retry_delay=args.retry_delay,
         )
+
         # Also create a checkpoint for an empty or already-complete resumed scan.
         save_checkpoint(args.checkpoint, urls, results)
+
     except CheckpointError as exc:
         print(f"Checkpoint error: {exc}", file=sys.stderr)
         return
+
     status_codes = classify_results(results)
-    render_report(status_codes, no_colour=args.no_colour)
-    render_report(status_codes, summary_only=args.summary_only)
+
+    render_report(
+        status_codes,
+        no_colour=args.no_colour,
+        summary_only=args.summary_only,
+    )
 
     if args.output:
         save_report(
