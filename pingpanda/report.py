@@ -322,7 +322,7 @@ def generate_text_report(
     return "\n".join(lines)
 
 
-# Print the report to the terminal
+
 # Print the report to the terminal
 def render_report(
     status_codes: dict[str, list[UrlResult]],
